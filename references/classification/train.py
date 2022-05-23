@@ -25,6 +25,8 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
     for i, (image, target) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
         start_time = time.time()
         image, target = image.to(device), target.to(device)
+        if args.channel_last:
+            image = image.to(memory_format=torch.channels_last)
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             output = model(image)
             loss = criterion(output, target)
@@ -67,6 +69,8 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     with torch.inference_mode():
         for image, target in metric_logger.log_every(data_loader, print_freq, header):
             image = image.to(device, non_blocking=True)
+            if args.channel_last:
+                image = image.to(memory_format=torch.channels_last)            
             target = target.to(device, non_blocking=True)
             output = model(image)
             loss = criterion(output, target)
@@ -198,6 +202,11 @@ def main(args):
     val_dir = os.path.join(args.data_path, "val")
     dataset, dataset_test, train_sampler, test_sampler = load_data(train_dir, val_dir, args)
 
+    local_rank = torch.distributed.get_rank()
+    if args.log_wandb and local_rank == 0:
+        import wandb
+        wandb.init(project=args.experiment, config=args)
+
     collate_fn = None
     num_classes = len(dataset.classes)
     mixup_transforms = []
@@ -296,6 +305,8 @@ def main(args):
     else:
         lr_scheduler = main_lr_scheduler
 
+    if args.channel_last:
+        model = model.to(memory_format=torch.channels_last)
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
@@ -453,6 +464,8 @@ def get_args_parser(add_help=True):
     # Mixed precision training parameters
     parser.add_argument("--amp", action="store_true", help="Use torch.cuda.amp for mixed precision training")
 
+    parser.add_argument("--channels-last", action="store_true", help="Use channels last memory format")
+
     # distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
     parser.add_argument("--dist-url", default="env://", type=str, help="url used to set up distributed training")
@@ -492,6 +505,12 @@ def get_args_parser(add_help=True):
         "--ra-reps", default=3, type=int, help="number of repetitions for Repeated Augmentation (default: 3)"
     )
     parser.add_argument("--weights", default=None, type=str, help="the weights enum name to load")
+
+    parser.add_argument('--log-wandb', action='store_true', default=False,
+                    help='log training and validation metrics to wandb')
+
+    parser.add_argument('--experiment', default='', type=str,
+                    help='name of train experiment')
 
     return parser
 
