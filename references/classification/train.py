@@ -203,9 +203,19 @@ def main(args):
     dataset, dataset_test, train_sampler, test_sampler = load_data(train_dir, val_dir, args)
 
     local_rank = torch.distributed.get_rank()
-    if args.log_wandb and local_rank == 0:
-        import wandb
-        wandb.init(project=args.experiment, config=args)
+    if args.log_wandb:
+        try:
+            import wandb
+            has_wandb = True
+        except ImportError:
+            has_wandb = False
+
+    if local_rank == 0 and args.log_wandb:
+        if has_wandb:
+            wandb.init(project=args.experiment, config=args)
+        else: 
+            print("Warning: You've requested to log metrics to wandb but package not found. "
+                            "Metrics not being logged to wandb, try `pip install wandb`")    
 
     collate_fn = None
     num_classes = len(dataset.classes)
