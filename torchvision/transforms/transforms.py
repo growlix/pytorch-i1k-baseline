@@ -428,7 +428,7 @@ class Pad(torch.nn.Module):
         if not isinstance(padding, (numbers.Number, tuple, list)):
             raise TypeError("Got inappropriate padding arg")
 
-        if not isinstance(fill, (numbers.Number, str, tuple, list)):
+        if not isinstance(fill, (numbers.Number, str, tuple)):
             raise TypeError("Got inappropriate fill arg")
 
         if padding_mode not in ["constant", "edge", "reflect", "symmetric"]:
@@ -628,7 +628,7 @@ class RandomCrop(torch.nn.Module):
         Returns:
             tuple: params (i, j, h, w) to be passed to ``crop`` for random crop.
         """
-        _, h, w = F.get_dimensions(img)
+        w, h = F.get_image_size(img)
         th, tw = output_size
 
         if h + 1 < th or w + 1 < tw:
@@ -663,7 +663,7 @@ class RandomCrop(torch.nn.Module):
         if self.padding is not None:
             img = F.pad(img, self.padding, self.fill, self.padding_mode)
 
-        _, height, width = F.get_dimensions(img)
+        width, height = F.get_image_size(img)
         # pad the width if needed
         if self.pad_if_needed and width < self.size[1]:
             padding = [self.size[1] - width, 0]
@@ -793,14 +793,14 @@ class RandomPerspective(torch.nn.Module):
         """
 
         fill = self.fill
-        channels, height, width = F.get_dimensions(img)
         if isinstance(img, Tensor):
             if isinstance(fill, (int, float)):
-                fill = [float(fill)] * channels
+                fill = [float(fill)] * F.get_image_num_channels(img)
             else:
                 fill = [float(f) for f in fill]
 
         if torch.rand(1) < self.p:
+            width, height = F.get_image_size(img)
             startpoints, endpoints = self.get_params(width, height, self.distortion_scale)
             return F.perspective(img, startpoints, endpoints, self.interpolation, fill)
         return img
@@ -910,7 +910,7 @@ class RandomResizedCrop(torch.nn.Module):
             tuple: params (i, j, h, w) to be passed to ``crop`` for a random
             sized crop.
         """
-        _, height, width = F.get_dimensions(img)
+        width, height = F.get_image_size(img)
         area = height * width
 
         log_ratio = torch.log(torch.tensor(ratio))
@@ -980,7 +980,7 @@ class FiveCrop(torch.nn.Module):
     Example:
          >>> transform = Compose([
          >>>    FiveCrop(size), # this is a list of PIL Images
-         >>>    Lambda(lambda crops: torch.stack([PILToTensor()(crop) for crop in crops])) # returns a 4D tensor
+         >>>    Lambda(lambda crops: torch.stack([ToTensor()(crop) for crop in crops])) # returns a 4D tensor
          >>> ])
          >>> #In your test loop you can do the following:
          >>> input, target = batch # input is a 5d tensor, target is 2d
@@ -1029,7 +1029,7 @@ class TenCrop(torch.nn.Module):
     Example:
          >>> transform = Compose([
          >>>    TenCrop(size), # this is a list of PIL Images
-         >>>    Lambda(lambda crops: torch.stack([PILToTensor()(crop) for crop in crops])) # returns a 4D tensor
+         >>>    Lambda(lambda crops: torch.stack([ToTensor()(crop) for crop in crops])) # returns a 4D tensor
          >>> ])
          >>> #In your test loop you can do the following:
          >>> input, target = batch # input is a 5d tensor, target is 2d
@@ -1339,10 +1339,9 @@ class RandomRotation(torch.nn.Module):
             PIL Image or Tensor: Rotated image.
         """
         fill = self.fill
-        channels, _, _ = F.get_dimensions(img)
         if isinstance(img, Tensor):
             if isinstance(fill, (int, float)):
-                fill = [float(fill)] * channels
+                fill = [float(fill)] * F.get_image_num_channels(img)
             else:
                 fill = [float(f) for f in fill]
         angle = self.get_params(self.degrees)
@@ -1520,14 +1519,13 @@ class RandomAffine(torch.nn.Module):
             PIL Image or Tensor: Affine transformed image.
         """
         fill = self.fill
-        channels, height, width = F.get_dimensions(img)
         if isinstance(img, Tensor):
             if isinstance(fill, (int, float)):
-                fill = [float(fill)] * channels
+                fill = [float(fill)] * F.get_image_num_channels(img)
             else:
                 fill = [float(f) for f in fill]
 
-        img_size = [width, height]  # flip for keeping BC on get_params call
+        img_size = F.get_image_size(img)
 
         ret = self.get_params(self.degrees, self.translate, self.scale, self.shear, img_size)
 
@@ -1610,7 +1608,7 @@ class RandomGrayscale(torch.nn.Module):
         Returns:
             PIL Image or Tensor: Randomly grayscaled image.
         """
-        num_output_channels, _, _ = F.get_dimensions(img)
+        num_output_channels = F.get_image_num_channels(img)
         if torch.rand(1) < self.p:
             return F.rgb_to_grayscale(img, num_output_channels=num_output_channels)
         return img
@@ -1894,7 +1892,7 @@ class RandomPosterize(torch.nn.Module):
 
     Args:
         bits (int): number of bits to keep for each channel (0-8)
-        p (float): probability of the image being posterized. Default value is 0.5
+        p (float): probability of the image being color inverted. Default value is 0.5
     """
 
     def __init__(self, bits, p=0.5):
@@ -1927,7 +1925,7 @@ class RandomSolarize(torch.nn.Module):
 
     Args:
         threshold (float): all pixels equal or above this value are inverted.
-        p (float): probability of the image being solarized. Default value is 0.5
+        p (float): probability of the image being color inverted. Default value is 0.5
     """
 
     def __init__(self, threshold, p=0.5):
@@ -1960,7 +1958,7 @@ class RandomAdjustSharpness(torch.nn.Module):
         sharpness_factor (float):  How much to adjust the sharpness. Can be
             any non negative number. 0 gives a blurred image, 1 gives the
             original image while 2 increases the sharpness by a factor of 2.
-        p (float): probability of the image being sharpened. Default value is 0.5
+        p (float): probability of the image being color inverted. Default value is 0.5
     """
 
     def __init__(self, sharpness_factor, p=0.5):

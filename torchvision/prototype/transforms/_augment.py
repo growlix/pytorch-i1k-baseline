@@ -7,7 +7,7 @@ import torch
 from torchvision.prototype import features
 from torchvision.prototype.transforms import Transform, functional as F
 
-from ._utils import query_image, get_image_dimensions, has_all, has_any, is_simple_tensor
+from ._utils import query_image
 
 
 class RandomErasing(Transform):
@@ -33,6 +33,7 @@ class RandomErasing(Transform):
             raise ValueError("Scale should be between 0 and 1")
         if p < 0 or p > 1:
             raise ValueError("Random erasing probability should be between 0 and 1")
+        # TODO: deprecate p in favor of wrapping the transform in a RandomApply
         self.p = p
         self.scale = scale
         self.ratio = ratio
@@ -40,7 +41,8 @@ class RandomErasing(Transform):
 
     def _get_params(self, sample: Any) -> Dict[str, Any]:
         image = query_image(sample)
-        img_c, img_h, img_w = get_image_dimensions(image)
+        img_c = F.get_image_num_channels(image)
+        img_w, img_h = F.get_image_size(image)
 
         if isinstance(self.value, (int, float)):
             value = [self.value]
@@ -87,22 +89,21 @@ class RandomErasing(Transform):
         return dict(zip("ijhwv", (i, j, h, w, v)))
 
     def _transform(self, input: Any, params: Dict[str, Any]) -> Any:
-        if isinstance(input, features.Image):
+        if isinstance(input, (features.BoundingBox, features.SegmentationMask)):
+            raise TypeError(f"{type(input).__name__}'s are not supported by {type(self).__name__}()")
+        elif isinstance(input, features.Image):
             output = F.erase_image_tensor(input, **params)
             return features.Image.new_like(input, output)
-        elif is_simple_tensor(input):
+        elif isinstance(input, torch.Tensor):
             return F.erase_image_tensor(input, **params)
         else:
             return input
 
     def forward(self, *inputs: Any) -> Any:
-        sample = inputs if len(inputs) > 1 else inputs[0]
-        if has_any(sample, features.BoundingBox, features.SegmentationMask):
-            raise TypeError(f"BoundingBox'es and SegmentationMask's are not supported by {type(self).__name__}()")
-        elif torch.rand(1) >= self.p:
-            return sample
+        if torch.rand(1) >= self.p:
+            return inputs if len(inputs) > 1 else inputs[0]
 
-        return super().forward(sample)
+        return super().forward(*inputs)
 
 
 class RandomMixup(Transform):
@@ -115,7 +116,9 @@ class RandomMixup(Transform):
         return dict(lam=float(self._dist.sample(())))
 
     def _transform(self, input: Any, params: Dict[str, Any]) -> Any:
-        if isinstance(input, features.Image):
+        if isinstance(input, (features.BoundingBox, features.SegmentationMask)):
+            raise TypeError(f"{type(input).__name__}'s are not supported by {type(self).__name__}()")
+        elif isinstance(input, features.Image):
             output = F.mixup_image_tensor(input, **params)
             return features.Image.new_like(input, output)
         elif isinstance(input, features.OneHotLabel):
@@ -123,14 +126,6 @@ class RandomMixup(Transform):
             return features.OneHotLabel.new_like(input, output)
         else:
             return input
-
-    def forward(self, *inputs: Any) -> Any:
-        sample = inputs if len(inputs) > 1 else inputs[0]
-        if has_any(sample, features.BoundingBox, features.SegmentationMask):
-            raise TypeError(f"BoundingBox'es and SegmentationMask's are not supported by {type(self).__name__}()")
-        elif not has_all(sample, features.Image, features.OneHotLabel):
-            raise TypeError(f"{type(self).__name__}() is only defined for Image's *and* OneHotLabel's.")
-        return super().forward(sample)
 
 
 class RandomCutmix(Transform):
@@ -143,7 +138,7 @@ class RandomCutmix(Transform):
         lam = float(self._dist.sample(()))
 
         image = query_image(sample)
-        _, H, W = get_image_dimensions(image)
+        W, H = F.get_image_size(image)
 
         r_x = torch.randint(W, ())
         r_y = torch.randint(H, ())
@@ -163,7 +158,9 @@ class RandomCutmix(Transform):
         return dict(box=box, lam_adjusted=lam_adjusted)
 
     def _transform(self, input: Any, params: Dict[str, Any]) -> Any:
-        if isinstance(input, features.Image):
+        if isinstance(input, (features.BoundingBox, features.SegmentationMask)):
+            raise TypeError(f"{type(input).__name__}'s are not supported by {type(self).__name__}()")
+        elif isinstance(input, features.Image):
             output = F.cutmix_image_tensor(input, box=params["box"])
             return features.Image.new_like(input, output)
         elif isinstance(input, features.OneHotLabel):
@@ -171,11 +168,3 @@ class RandomCutmix(Transform):
             return features.OneHotLabel.new_like(input, output)
         else:
             return input
-
-    def forward(self, *inputs: Any) -> Any:
-        sample = inputs if len(inputs) > 1 else inputs[0]
-        if has_any(sample, features.BoundingBox, features.SegmentationMask):
-            raise TypeError(f"BoundingBox'es and SegmentationMask's are not supported by {type(self).__name__}()")
-        elif not has_all(sample, features.Image, features.OneHotLabel):
-            raise TypeError(f"{type(self).__name__}() is only defined for Image's *and* OneHotLabel's.")
-        return super().forward(sample)

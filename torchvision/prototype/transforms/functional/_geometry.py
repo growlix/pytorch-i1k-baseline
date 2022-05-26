@@ -5,18 +5,15 @@ import PIL.Image
 import torch
 from torchvision.prototype import features
 from torchvision.prototype.transforms import InterpolationMode
+from torchvision.prototype.transforms.functional import get_image_size
 from torchvision.transforms import functional_tensor as _FT, functional_pil as _FP
 from torchvision.transforms.functional import pil_modes_mapping, _get_inverse_affine_matrix
 
-from ._meta import convert_bounding_box_format, get_dimensions_image_tensor, get_dimensions_image_pil
+from ._meta_conversion import convert_bounding_box_format
 
 
 horizontal_flip_image_tensor = _FT.hflip
 horizontal_flip_image_pil = _FP.hflip
-
-
-def horizontal_flip_segmentation_mask(segmentation_mask: torch.Tensor) -> torch.Tensor:
-    return horizontal_flip_image_tensor(segmentation_mask)
 
 
 def horizontal_flip_bounding_box(
@@ -31,7 +28,7 @@ def horizontal_flip_bounding_box(
     bounding_box[:, [0, 2]] = image_size[1] - bounding_box[:, [2, 0]]
 
     return convert_bounding_box_format(
-        bounding_box, old_format=features.BoundingBoxFormat.XYXY, new_format=format, copy=False
+        bounding_box, old_format=features.BoundingBoxFormat.XYXY, new_format=format
     ).view(shape)
 
 
@@ -43,7 +40,8 @@ def resize_image_tensor(
     antialias: Optional[bool] = None,
 ) -> torch.Tensor:
     new_height, new_width = size
-    num_channels, old_height, old_width = get_dimensions_image_tensor(image)
+    old_width, old_height = _FT.get_image_size(image)
+    num_channels = _FT.get_image_num_channels(image)
     batch_shape = image.shape[:-3]
     return _FT.resize(
         image.reshape((-1, num_channels, old_height, old_width)),
@@ -145,9 +143,9 @@ def affine_image_tensor(
 
     center_f = [0.0, 0.0]
     if center is not None:
-        _, height, width = get_dimensions_image_tensor(img)
+        width, height = get_image_size(img)
         # Center values should be in pixel coordinates but translated such that (0, 0) corresponds to image center.
-        center_f = [1.0 * (c - s * 0.5) for c, s in zip(center, [width, height])]
+        center_f = [1.0 * (c - s * 0.5) for c, s in zip(center, (width, height))]
 
     translate_f = [1.0 * t for t in translate]
     matrix = _get_inverse_affine_matrix(center_f, angle, translate_f, scale, shear)
@@ -171,62 +169,11 @@ def affine_image_pil(
     # it is visually better to estimate the center without 0.5 offset
     # otherwise image rotated by 90 degrees is shifted vs output image of torch.rot90 or F_t.affine
     if center is None:
-        _, height, width = get_dimensions_image_pil(img)
+        width, height = get_image_size(img)
         center = [width * 0.5, height * 0.5]
     matrix = _get_inverse_affine_matrix(center, angle, translate, scale, shear)
 
     return _FP.affine(img, matrix, interpolation=pil_modes_mapping[interpolation], fill=fill)
-
-
-def affine_bounding_box(
-    bounding_box: torch.Tensor,
-    format: features.BoundingBoxFormat,
-    image_size: Tuple[int, int],
-    angle: float,
-    translate: List[float],
-    scale: float,
-    shear: List[float],
-    center: Optional[List[float]] = None,
-) -> torch.Tensor:
-    original_shape = bounding_box.shape
-    bounding_box = convert_bounding_box_format(
-        bounding_box, old_format=format, new_format=features.BoundingBoxFormat.XYXY
-    ).view(-1, 4)
-
-    dtype = bounding_box.dtype if torch.is_floating_point(bounding_box) else torch.float32
-    device = bounding_box.device
-
-    if center is None:
-        height, width = image_size
-        center_f = [width * 0.5, height * 0.5]
-    else:
-        center_f = [float(c) for c in center]
-
-    translate_f = [float(t) for t in translate]
-    affine_matrix = torch.tensor(
-        _get_inverse_affine_matrix(center_f, angle, translate_f, scale, shear, inverted=False),
-        dtype=dtype,
-        device=device,
-    ).view(2, 3)
-    # 1) Let's transform bboxes into a tensor of 4 points (top-left, top-right, bottom-left, bottom-right corners).
-    # Tensor of points has shape (N * 4, 3), where N is the number of bboxes
-    # Single point structure is similar to
-    # [(xmin, ymin, 1), (xmax, ymin, 1), (xmax, ymax, 1), (xmin, ymax, 1)]
-    points = bounding_box[:, [[0, 1], [2, 1], [2, 3], [0, 3]]].view(-1, 2)
-    points = torch.cat([points, torch.ones(points.shape[0], 1, device=points.device)], dim=-1)
-    # 2) Now let's transform the points using affine matrix
-    transformed_points = torch.matmul(points, affine_matrix.T)
-    # 3) Reshape transformed points to [N boxes, 4 points, x/y coords]
-    # and compute bounding box from 4 transformed points:
-    transformed_points = transformed_points.view(-1, 4, 2)
-    out_bbox_mins, _ = torch.min(transformed_points, dim=1)
-    out_bbox_maxs, _ = torch.max(transformed_points, dim=1)
-    out_bboxes = torch.cat([out_bbox_mins, out_bbox_maxs], dim=1)
-    # out_bboxes should be of shape [N boxes, 4]
-
-    return convert_bounding_box_format(
-        out_bboxes, old_format=features.BoundingBoxFormat.XYXY, new_format=format, copy=False
-    ).view(original_shape)
 
 
 def rotate_image_tensor(
@@ -239,9 +186,9 @@ def rotate_image_tensor(
 ) -> torch.Tensor:
     center_f = [0.0, 0.0]
     if center is not None:
-        _, height, width = get_dimensions_image_tensor(img)
+        width, height = get_image_size(img)
         # Center values should be in pixel coordinates but translated such that (0, 0) corresponds to image center.
-        center_f = [1.0 * (c - s * 0.5) for c, s in zip(center, [width, height])]
+        center_f = [1.0 * (c - s * 0.5) for c, s in zip(center, (width, height))]
 
     # due to current incoherence of rotation angle direction between affine and rotate implementations
     # we need to set -angle.
@@ -264,26 +211,6 @@ def rotate_image_pil(
 
 pad_image_tensor = _FT.pad
 pad_image_pil = _FP.pad
-
-
-def pad_bounding_box(
-    bounding_box: torch.Tensor, padding: List[int], format: features.BoundingBoxFormat
-) -> torch.Tensor:
-    left, _, top, _ = _FT._parse_pad_padding(padding)
-
-    shape = bounding_box.shape
-
-    bounding_box = convert_bounding_box_format(
-        bounding_box, old_format=format, new_format=features.BoundingBoxFormat.XYXY
-    ).view(-1, 4)
-
-    bounding_box[:, 0::2] += left
-    bounding_box[:, 1::2] += top
-
-    return convert_bounding_box_format(
-        bounding_box, old_format=features.BoundingBoxFormat.XYXY, new_format=format, copy=False
-    ).view(shape)
-
 
 crop_image_tensor = _FT.crop
 crop_image_pil = _FP.crop
@@ -335,13 +262,13 @@ def _center_crop_compute_crop_anchor(
 
 def center_crop_image_tensor(img: torch.Tensor, output_size: List[int]) -> torch.Tensor:
     crop_height, crop_width = _center_crop_parse_output_size(output_size)
-    _, image_height, image_width = get_dimensions_image_tensor(img)
+    image_width, image_height = get_image_size(img)
 
     if crop_height > image_height or crop_width > image_width:
         padding_ltrb = _center_crop_compute_padding(crop_height, crop_width, image_height, image_width)
         img = pad_image_tensor(img, padding_ltrb, fill=0)
 
-        _, image_height, image_width = get_dimensions_image_tensor(img)
+        image_width, image_height = get_image_size(img)
         if crop_width == image_width and crop_height == image_height:
             return img
 
@@ -351,13 +278,13 @@ def center_crop_image_tensor(img: torch.Tensor, output_size: List[int]) -> torch
 
 def center_crop_image_pil(img: PIL.Image.Image, output_size: List[int]) -> PIL.Image.Image:
     crop_height, crop_width = _center_crop_parse_output_size(output_size)
-    _, image_height, image_width = get_dimensions_image_pil(img)
+    image_width, image_height = get_image_size(img)
 
     if crop_height > image_height or crop_width > image_width:
         padding_ltrb = _center_crop_compute_padding(crop_height, crop_width, image_height, image_width)
         img = pad_image_pil(img, padding_ltrb, fill=0)
 
-        _, image_height, image_width = get_dimensions_image_pil(img)
+        image_width, image_height = get_image_size(img)
         if crop_width == image_width and crop_height == image_height:
             return img
 
@@ -389,79 +316,3 @@ def resized_crop_image_pil(
 ) -> PIL.Image.Image:
     img = crop_image_pil(img, top, left, height, width)
     return resize_image_pil(img, size, interpolation=interpolation)
-
-
-def _parse_five_crop_size(size: List[int]) -> List[int]:
-    if isinstance(size, numbers.Number):
-        size = [int(size), int(size)]
-    elif isinstance(size, (tuple, list)) and len(size) == 1:
-        size = [size[0], size[0]]
-
-    if len(size) != 2:
-        raise ValueError("Please provide only two dimensions (h, w) for size.")
-
-    return size
-
-
-def five_crop_image_tensor(
-    img: torch.Tensor, size: List[int]
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    crop_height, crop_width = _parse_five_crop_size(size)
-    _, image_height, image_width = get_dimensions_image_tensor(img)
-
-    if crop_width > image_width or crop_height > image_height:
-        msg = "Requested crop size {} is bigger than input size {}"
-        raise ValueError(msg.format(size, (image_height, image_width)))
-
-    tl = crop_image_tensor(img, 0, 0, crop_height, crop_width)
-    tr = crop_image_tensor(img, 0, image_width - crop_width, crop_height, crop_width)
-    bl = crop_image_tensor(img, image_height - crop_height, 0, crop_height, crop_width)
-    br = crop_image_tensor(img, image_height - crop_height, image_width - crop_width, crop_height, crop_width)
-    center = center_crop_image_tensor(img, [crop_height, crop_width])
-
-    return tl, tr, bl, br, center
-
-
-def five_crop_image_pil(
-    img: PIL.Image.Image, size: List[int]
-) -> Tuple[PIL.Image.Image, PIL.Image.Image, PIL.Image.Image, PIL.Image.Image, PIL.Image.Image]:
-    crop_height, crop_width = _parse_five_crop_size(size)
-    _, image_height, image_width = get_dimensions_image_pil(img)
-
-    if crop_width > image_width or crop_height > image_height:
-        msg = "Requested crop size {} is bigger than input size {}"
-        raise ValueError(msg.format(size, (image_height, image_width)))
-
-    tl = crop_image_pil(img, 0, 0, crop_height, crop_width)
-    tr = crop_image_pil(img, 0, image_width - crop_width, crop_height, crop_width)
-    bl = crop_image_pil(img, image_height - crop_height, 0, crop_height, crop_width)
-    br = crop_image_pil(img, image_height - crop_height, image_width - crop_width, crop_height, crop_width)
-    center = center_crop_image_pil(img, [crop_height, crop_width])
-
-    return tl, tr, bl, br, center
-
-
-def ten_crop_image_tensor(img: torch.Tensor, size: List[int], vertical_flip: bool = False) -> List[torch.Tensor]:
-    tl, tr, bl, br, center = five_crop_image_tensor(img, size)
-
-    if vertical_flip:
-        img = vertical_flip_image_tensor(img)
-    else:
-        img = horizontal_flip_image_tensor(img)
-
-    tl_flip, tr_flip, bl_flip, br_flip, center_flip = five_crop_image_tensor(img, size)
-
-    return [tl, tr, bl, br, center, tl_flip, tr_flip, bl_flip, br_flip, center_flip]
-
-
-def ten_crop_image_pil(img: PIL.Image.Image, size: List[int], vertical_flip: bool = False) -> List[PIL.Image.Image]:
-    tl, tr, bl, br, center = five_crop_image_pil(img, size)
-
-    if vertical_flip:
-        img = vertical_flip_image_pil(img)
-    else:
-        img = horizontal_flip_image_pil(img)
-
-    tl_flip, tr_flip, bl_flip, br_flip, center_flip = five_crop_image_pil(img, size)
-
-    return [tl, tr, bl, br, center, tl_flip, tr_flip, bl_flip, br_flip, center_flip]
