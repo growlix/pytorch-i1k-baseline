@@ -371,10 +371,22 @@ def main(args):
 
     print("Start training")
     start_time = time.time()
+    wall_clock_train = 0
+    wall_clock_total = 0
+    end = time.time()    
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
+
         train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
+        wall_clock_train += (time.time() - end)
+
+        if args.local_rank == 0 and has_wandb:
+            wandb.log({
+                "epoch": epoch,
+                "wall_clock/train": wall_clock_train
+            })        
+            
         lr_scheduler.step()
         evaluate(model, criterion, data_loader_test, device=device)
         if model_ema:
@@ -393,6 +405,14 @@ def main(args):
                 checkpoint["scaler"] = scaler.state_dict()
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
+            
+        if args.local_rank == 0 and has_wandb:
+            wall_clock_total += (time.time() - end)
+            wandb.log({
+                "epoch": epoch,
+                "wall_clock/total": wall_clock_total
+            })
+        end = time.time()                    
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
