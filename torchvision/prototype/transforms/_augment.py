@@ -100,8 +100,14 @@ class RandomErasing(Transform):
             return input
 
     def forward(self, *inputs: Any) -> Any:
+<<<<<<< HEAD
         if torch.rand(1) >= self.p:
             return inputs if len(inputs) > 1 else inputs[0]
+=======
+        sample = inputs if len(inputs) > 1 else inputs[0]
+        if has_any(sample, features.BoundingBox, features.SegmentationMask):
+            raise TypeError(f"BoundingBox'es and SegmentationMask's are not supported by {type(self).__name__}()")
+>>>>>>> main
 
         return super().forward(*inputs)
 
