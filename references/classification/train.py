@@ -25,7 +25,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, arg
     for i, (image, target) in enumerate(metric_logger.log_every(data_loader, args.print_freq, header)):
         start_time = time.time()
         image, target = image.to(device), target.to(device)
-        if args.channel_last:
+        if args.channels_last:
             image = image.to(memory_format=torch.channels_last)
         with torch.cuda.amp.autocast(enabled=scaler is not None):
             output = model(image)
@@ -69,7 +69,7 @@ def evaluate(model, criterion, data_loader, device, print_freq=100, log_suffix="
     with torch.inference_mode():
         for image, target in metric_logger.log_every(data_loader, print_freq, header):
             image = image.to(device, non_blocking=True)
-            if args.channel_last:
+            if args.channels_last:
                 image = image.to(memory_format=torch.channels_last)            
             target = target.to(device, non_blocking=True)
             output = model(image)
@@ -240,7 +240,7 @@ def main(args):
     )
 
     print("Creating model")
-    model = torchvision.models.__dict__[args.model](weights=args.weights, num_classes=num_classes)
+    model = torchvision.models.__dict__[args.model](num_classes=num_classes)
     model.to(device)
 
     if args.distributed and args.sync_bn:
@@ -315,7 +315,7 @@ def main(args):
     else:
         lr_scheduler = main_lr_scheduler
 
-    if args.channel_last:
+    if args.channels_last:
         model = model.to(memory_format=torch.channels_last)
     model_without_ddp = model
     if args.distributed:
@@ -474,7 +474,7 @@ def get_args_parser(add_help=True):
     # Mixed precision training parameters
     parser.add_argument("--amp", action="store_true", help="Use torch.cuda.amp for mixed precision training")
 
-    parser.add_argument("--channels-last", action="store_true", help="Use channels last memory format")
+    parser.add_argument("--channels-last", action="store_true", default=False, help="Use channels last memory format")
 
     # distributed training parameters
     parser.add_argument("--world-size", default=1, type=int, help="number of distributed processes")
