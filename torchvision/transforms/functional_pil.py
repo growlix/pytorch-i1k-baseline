@@ -10,7 +10,6 @@ try:
     import accimage
 except ImportError:
     accimage = None
-from . import _pil_constants
 
 
 @torch.jit.unused
@@ -19,18 +18,6 @@ def _is_pil_image(img: Any) -> bool:
         return isinstance(img, (Image.Image, accimage.Image))
     else:
         return isinstance(img, Image.Image)
-
-
-@torch.jit.unused
-def get_dimensions(img: Any) -> List[int]:
-    if _is_pil_image(img):
-        if hasattr(img, "getbands"):
-            channels = len(img.getbands())
-        else:
-            channels = img.channels
-        width, height = img.size
-        return [channels, height, width]
-    raise TypeError(f"Unexpected type {type(img)}")
 
 
 @torch.jit.unused
@@ -43,10 +30,7 @@ def get_image_size(img: Any) -> List[int]:
 @torch.jit.unused
 def get_image_num_channels(img: Any) -> int:
     if _is_pil_image(img):
-        if hasattr(img, "getbands"):
-            return len(img.getbands())
-        else:
-            return img.channels
+        return 1 if img.mode == "L" else 3
     raise TypeError(f"Unexpected type {type(img)}")
 
 
@@ -55,7 +39,7 @@ def hflip(img: Image.Image) -> Image.Image:
     if not _is_pil_image(img):
         raise TypeError(f"img should be PIL Image. Got {type(img)}")
 
-    return img.transpose(_pil_constants.FLIP_LEFT_RIGHT)
+    return img.transpose(Image.FLIP_LEFT_RIGHT)
 
 
 @torch.jit.unused
@@ -63,7 +47,7 @@ def vflip(img: Image.Image) -> Image.Image:
     if not _is_pil_image(img):
         raise TypeError(f"img should be PIL Image. Got {type(img)}")
 
-    return img.transpose(_pil_constants.FLIP_TOP_BOTTOM)
+    return img.transpose(Image.FLIP_TOP_BOTTOM)
 
 
 @torch.jit.unused
@@ -155,7 +139,7 @@ def pad(
 
     if not isinstance(padding, (numbers.Number, tuple, list)):
         raise TypeError("Got inappropriate padding arg")
-    if not isinstance(fill, (numbers.Number, tuple, list)):
+    if not isinstance(fill, (numbers.Number, str, tuple)):
         raise TypeError("Got inappropriate fill arg")
     if not isinstance(padding_mode, str):
         raise TypeError("Got inappropriate padding_mode arg")
@@ -241,7 +225,7 @@ def crop(
 def resize(
     img: Image.Image,
     size: Union[Sequence[int], int],
-    interpolation: int = _pil_constants.BILINEAR,
+    interpolation: int = Image.BILINEAR,
     max_size: Optional[int] = None,
 ) -> Image.Image:
 
@@ -302,12 +286,6 @@ def _parse_fill(
 
         fill = tuple(fill)
 
-    if img.mode != "F":
-        if isinstance(fill, (list, tuple)):
-            fill = tuple(int(x) for x in fill)
-        else:
-            fill = int(fill)
-
     return {name: fill}
 
 
@@ -315,7 +293,7 @@ def _parse_fill(
 def affine(
     img: Image.Image,
     matrix: List[float],
-    interpolation: int = _pil_constants.NEAREST,
+    interpolation: int = Image.NEAREST,
     fill: Optional[Union[float, List[float], Tuple[float, ...]]] = 0,
 ) -> Image.Image:
 
@@ -324,14 +302,14 @@ def affine(
 
     output_size = img.size
     opts = _parse_fill(fill, img)
-    return img.transform(output_size, _pil_constants.AFFINE, matrix, interpolation, **opts)
+    return img.transform(output_size, Image.AFFINE, matrix, interpolation, **opts)
 
 
 @torch.jit.unused
 def rotate(
     img: Image.Image,
     angle: float,
-    interpolation: int = _pil_constants.NEAREST,
+    interpolation: int = Image.NEAREST,
     expand: bool = False,
     center: Optional[Tuple[int, int]] = None,
     fill: Optional[Union[float, List[float], Tuple[float, ...]]] = 0,
@@ -348,7 +326,7 @@ def rotate(
 def perspective(
     img: Image.Image,
     perspective_coeffs: float,
-    interpolation: int = _pil_constants.BICUBIC,
+    interpolation: int = Image.BICUBIC,
     fill: Optional[Union[float, List[float], Tuple[float, ...]]] = 0,
 ) -> Image.Image:
 
@@ -357,7 +335,7 @@ def perspective(
 
     opts = _parse_fill(fill, img)
 
-    return img.transform(img.size, _pil_constants.PERSPECTIVE, perspective_coeffs, interpolation, **opts)
+    return img.transform(img.size, Image.PERSPECTIVE, perspective_coeffs, interpolation, **opts)
 
 
 @torch.jit.unused
