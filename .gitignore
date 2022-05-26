@@ -43,3 +43,5 @@ xcuserdata/
 .envrc
 
 *wandb*
+
+*.pth
