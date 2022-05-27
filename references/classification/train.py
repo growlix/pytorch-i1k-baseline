@@ -377,7 +377,7 @@ def main(args):
         train_one_epoch(model, criterion, optimizer, data_loader, device, epoch, args, model_ema, scaler)
         wall_clock_train += (time.time() - end)
 
-        if args.local_rank == 0 and has_wandb:
+        if local_rank == 0 and has_wandb:
             wandb.log({
                 "epoch": epoch,
                 "wall_clock/train": wall_clock_train
@@ -402,7 +402,7 @@ def main(args):
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, f"model_{epoch}.pth"))
             utils.save_on_master(checkpoint, os.path.join(args.output_dir, "checkpoint.pth"))
             
-        if args.local_rank == 0 and has_wandb:
+        if local_rank == 0 and has_wandb:
             wall_clock_total += (time.time() - end)
             wandb.log({
                 "epoch": epoch,
